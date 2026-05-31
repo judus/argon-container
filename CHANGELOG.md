@@ -4,6 +4,10 @@ All notable changes to `maduser/argon-container` will be documented in this file
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed the duplicate lowercase `readme.md` and kept the full package documentation as `README.md`.
+
 ## [1.3.0] - 2026-05-24
 
 ### Changed
