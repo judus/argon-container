@@ -19,7 +19,13 @@ use ReflectionException;
 use ReflectionMethod;
 use RuntimeException;
 use stdClass;
+use TypeError;
+use Tests\Integration\Compiler\Mocks\SelfDependent;
 use Tests\Integration\Compiler\Mocks\DefaultValueService;
+use Tests\Integration\Compiler\Mocks\CyclicFactory;
+use Tests\Integration\Compiler\Mocks\CyclicPreInterceptor;
+use Tests\Integration\Compiler\Mocks\CyclicPostInterceptor;
+use Tests\Integration\Compiler\Mocks\ResolutionLimitInterceptor;
 use Tests\Integration\Compiler\Mocks\FallbackConsumer;
 use Tests\Integration\Compiler\Mocks\DependentLoggerInterceptor;
 use Tests\Integration\Compiler\Mocks\ImplicitNullable;
@@ -37,6 +43,9 @@ use Tests\Integration\Compiler\Mocks\TestServiceWithMultipleParams;
 use Tests\Integration\Compiler\Mocks\WithOptionalInterface;
 use Tests\Integration\Compiler\Mocks\WithOptionalService;
 use Tests\Integration\Mocks\CustomLogger;
+use Tests\Integration\Mocks\A;
+use Tests\Integration\Mocks\B;
+use Tests\Integration\Mocks\C;
 use Tests\Integration\Mocks\DeepGraph;
 use Tests\Integration\Mocks\Foo;
 use Tests\Integration\Mocks\InterceptedClass;
@@ -53,6 +62,143 @@ use Tests\Mocks\DummyProvider;
 final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
+
+    /** @return iterable<string, array{string, string, bool}> */
+    public static function cycleCases(): iterable
+    {
+        foreach (['runtime', 'dynamic', 'strict', 'mixed'] as $mode) {
+            $kinds = $mode === 'mixed' ? ['constructor'] : ['constructor', 'self', 'factory', 'pre', 'post'];
+            foreach ($kinds as $kind) {
+                foreach ([true, false] as $shared) {
+                    yield $mode . '_' . $kind . '_' . (int) $shared => [$mode, $kind, $shared];
+                }
+            }
+        }
+    }
+
+    #[DataProvider('cycleCases')]
+    public function testResolutionCyclesAreDetectedAndUnwound(string $mode, string $kind, bool $shared): void
+    {
+        $container = new ArgonContainer(strictMode: $mode === 'strict');
+        // Compiled interceptor IDs are fully qualified; bind that exact ID in strict mode.
+        $container->set(ResolutionLimitInterceptor::class);
+        $container->set('\\' . ResolutionLimitInterceptor::class);
+        $container->registerInterceptor(ResolutionLimitInterceptor::class);
+        $container->set(Logger::class);
+        $container->set(A::class);
+        $container->set(B::class);
+        $container->set(C::class);
+        $container->set(SelfDependent::class);
+        $container->set(stdClass::class);
+        if ($mode === 'mixed') {
+            $container->set(B::class)->skipCompilation();
+        }
+
+        if ($kind === 'factory') {
+            $container->set(CyclicFactory::class);
+            $container->set(stdClass::class)->factory(CyclicFactory::class, 'create');
+        } elseif ($kind === 'pre') {
+            $container->set(CyclicPreInterceptor::class);
+            $container->set('\\' . CyclicPreInterceptor::class);
+            $container->registerInterceptor(CyclicPreInterceptor::class);
+        } elseif ($kind === 'post') {
+            $container->set(CyclicPostInterceptor::class);
+            $container->set('\\' . CyclicPostInterceptor::class);
+            $container->registerInterceptor(CyclicPostInterceptor::class);
+        }
+        if (!$shared) {
+            foreach ($container->getBindings() as $descriptor) {
+                $descriptor->setShared(false);
+            }
+        }
+        if ($mode !== 'runtime') {
+            $container = $this->compileAndLoadContainer($container, 'Cycle_' . $mode . '_' . $kind . (int) $shared);
+        }
+
+        $id = match ($kind) {
+            'constructor' => A::class,
+            'self' => SelfDependent::class,
+            default => stdClass::class,
+        };
+        $prefix = $mode === 'runtime' ? '' : '\\';
+        $chain = match ($kind) {
+            'constructor' => [A::class, B::class, C::class, A::class],
+            'self' => [SelfDependent::class, SelfDependent::class],
+            'factory' => [stdClass::class, stdClass::class],
+            'pre' => [stdClass::class, $prefix . CyclicPreInterceptor::class, stdClass::class],
+            'post' => [stdClass::class, $prefix . CyclicPostInterceptor::class, stdClass::class],
+        };
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            ResolutionLimitInterceptor::$calls = 0;
+            try {
+                $container->get($id);
+                self::fail('Expected a circular dependency exception.');
+            } catch (ContainerException $exception) {
+                self::assertStringContainsString(
+                    "Circular dependency detected for service '$id'. Chain: " . implode(' -> ', $chain),
+                    $exception->getMessage()
+                );
+            }
+            self::assertInstanceOf(Logger::class, $container->get(Logger::class));
+        }
+        if ($kind === 'factory') {
+            $replacement = new stdClass();
+            self::assertSame($replacement, $container->get(stdClass::class, ['dependency' => $replacement]));
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledResolutionGuardIsClearedAfterErrors(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(PrimitiveService::class, args: ['path' => 'valid']);
+        $compiled = $this->compileAndLoadContainer($runtime, 'GuardErrors_' . (int) $strict);
+
+        foreach ([$runtime, $compiled] as $container) {
+            for ($attempt = 0; $attempt < 2; $attempt++) {
+                try {
+                    $container->get(PrimitiveService::class, ['path' => new stdClass()]);
+                    self::fail('Expected an invalid constructor argument to fail.');
+                } catch (ContainerException | TypeError $exception) {
+                    self::assertStringNotContainsString('Circular dependency', $exception->getMessage());
+                }
+                try {
+                    $container->get('missing-service');
+                    self::fail('Expected a missing service to fail.');
+                } catch (NotFoundException $exception) {
+                    self::assertStringContainsString('missing-service', $exception->getMessage());
+                }
+            }
+            $service = $container->get(PrimitiveService::class);
+            self::assertSame('valid', $service->path);
+            self::assertSame($service, $container->get(PrimitiveService::class));
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledCycleCanBeShortCircuitedAndGuardIsCleared(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(ResolutionLimitInterceptor::class);
+        $runtime->set('\\' . ResolutionLimitInterceptor::class);
+        $runtime->registerInterceptor(ResolutionLimitInterceptor::class);
+        $runtime->set(CyclicFactory::class);
+        $runtime->set(stdClass::class)->factory(CyclicFactory::class, 'create');
+        $compiled = $this->compileAndLoadContainer($runtime, 'GuardShortCircuit_' . (int) $strict);
+
+        try {
+            $replacement = new stdClass();
+            ResolutionLimitInterceptor::$replacement = $replacement;
+            ResolutionLimitInterceptor::$calls = 0;
+            foreach ([$runtime, $compiled] as $container) {
+                self::assertSame($replacement, $container->get(stdClass::class));
+                self::assertSame($replacement, $container->get(stdClass::class));
+            }
+        } finally {
+            ResolutionLimitInterceptor::$replacement = null;
+            ResolutionLimitInterceptor::$calls = 0;
+        }
+    }
 
     /** @return iterable<string, array{bool}> */
     public static function fallbackLifecycles(): iterable

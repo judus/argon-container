@@ -67,6 +67,7 @@ final class CoreContainerGenerator
 
     private function generateCoreProperties(ClassType $class): void
     {
+        $class->addProperty('resolving')->setPrivate()->setType('array')->setValue([]);
         $class->addProperty('tagMap')->setPrivate()->setValue($this->container->getTags(true));
         $class->addProperty('parameters')->setPrivate()->setValue($this->container->getParameters()->all());
 
@@ -152,33 +153,34 @@ final class CoreContainerGenerator
         $method = $class->addMethod('get')
             ->setReturnType('object');
 
-        $strictBody = <<<'PHP'
-                $instance = $this->applyPreInterceptors($id, $args);
-                if ($instance !== null) {
-                    return $instance;
+        $fallback = $this->strictMode
+            ? 'throw new NotFoundException($id, \'compiled\');'
+            : 'return $this->applyPostInterceptors(parent::get($id, $args));';
+
+        $method->setBody(<<<PHP
+            if (isset(\$this->resolving[\$id])) {
+                \$chain = array_keys(\$this->resolving);
+                \$chain[] = \$id;
+                throw ContainerException::forCircularDependency(\$id, \$chain);
+            }
+
+            \$this->resolving[\$id] = true;
+
+            try {
+                \$instance = \$this->applyPreInterceptors(\$id, \$args);
+                if (\$instance !== null) {
+                    return \$instance;
                 }
 
-                if (!isset($this->serviceMap[$id])) {
-                    throw new NotFoundException($id, 'compiled');
+                if (isset(\$this->serviceMap[\$id])) {
+                    return \$this->{\$this->serviceMap[\$id]}(\$args);
                 }
 
-                return $this->{$this->serviceMap[$id]}($args);
-        PHP;
-
-        $lenientBody = <<<'PHP'
-                $instance = $this->applyPreInterceptors($id, $args);
-                if ($instance !== null) {
-                    return $instance;
-                }
-
-                if (isset($this->serviceMap[$id])) {
-                    return $this->{$this->serviceMap[$id]}($args);
-                }
-
-                return $this->applyPostInterceptors(parent::get($id, $args));
-        PHP;
-
-        $method->setBody($this->strictMode ? $strictBody : $lenientBody);
+                {$fallback}
+            } finally {
+                unset(\$this->resolving[\$id]);
+            }
+        PHP);
 
         $method->addParameter('id')->setType('string');
         $method->addParameter('args')->setType('array')->setDefaultValue([]);
