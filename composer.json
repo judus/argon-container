@@ -19,9 +19,9 @@
   },
   "require-dev": {
     "dealerdirect/phpcodesniffer-composer-installer": "^1.1",
-    "phpunit/phpunit": "^11.5",
+    "phpunit/phpunit": "^11.5.50",
     "slevomat/coding-standard": "^8.24",
-    "squizlabs/php_codesniffer": "^4.0",
+    "squizlabs/php_codesniffer": "^4.0.2",
     "vimeo/psalm": "^6.13"
   },
   "autoload": {
@@ -45,8 +45,9 @@
     "phpcs": "vendor/bin/phpcs --standard=phpcs.xml",
     "psalm": "vendor/bin/psalm --no-cache --output-format=github",
     "phpcs:fix": "vendor/bin/phpcbf --standard=phpcs.xml",
-    "check": ["@test", "@psalm", "@phpcs"],
-    "ci": ["@test", "@test:coverage", "@psalm", "@phpcs"]
+    "audit:dependencies": "@composer audit --locked",
+    "check": ["@audit:dependencies", "@test", "@psalm", "@phpcs"],
+    "ci": ["@audit:dependencies", "@test", "@test:coverage", "@psalm", "@phpcs"]
   },
   "config": {
     "allow-plugins": {

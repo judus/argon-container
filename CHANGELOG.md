@@ -6,6 +6,7 @@ All notable changes to `maduser/argon-container` will be documented in this file
 
 ### Fixed
 
+- Updated PHPUnit to 11.5.57 and PHP_CodeSniffer to 4.0.4, with development dependency minimums of 11.5.50 and 4.0.2 respectively. Dependency auditing now runs in `composer check`, `composer ci`, and GitHub Actions through `composer audit:dependencies`; it requires advisory-service access.
 - Compiled method invocation now uses PHP's native scalar argument coercion instead of unconditional numeric casts: numeric strings remain accepted, while invalid numeric input throws before the handler executes. A single weak-typed call helper preserves reflection-free compiled invocation; the generated container and application code remain strict.
 - Compiled containers now detect circular resolution through constructors, factories, interceptors, and dynamic fallback, throwing `ContainerException` with the dependency chain and clearing the guard after success or failure. Runtime overrides and pre-interceptor short-circuits can still break apparent cycles.
 - Dynamic compiled fallback now resolves constructor and closure dependencies through the compiled graph, retaining interface bindings, bound configuration, factory products, and shared/transient lifecycles.

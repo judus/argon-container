@@ -63,6 +63,9 @@ jobs:
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress --no-suggest ${{ matrix.composer-options }}
 
+    - name: Audit locked dependencies
+      run: composer audit:dependencies
+
     - name: Run PHPUnit
       if: matrix.php-version != '8.4'
       run: vendor/bin/phpunit

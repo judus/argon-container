@@ -48,6 +48,10 @@ $ vendor/bin/phpcs
 $ composer check
 ```
 
+`composer check` includes an audit of locked production and development dependencies,
+followed by PHPUnit, Psalm and PHPCS. The audit requires access to Composer's advisory
+service and also runs in CI. Run it separately with `composer audit:dependencies`.
+
 ---
 
 ## Usage
