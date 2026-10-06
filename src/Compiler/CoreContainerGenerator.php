@@ -158,6 +158,13 @@ final class CoreContainerGenerator
             : 'return $this->applyPostInterceptors(parent::get($id, $args));';
 
         $method->setBody(<<<PHP
+            if (
+                \$id === \\Maduser\\Argon\\Container\\ArgonContainer::class
+                || \$id === \\Psr\\Container\\ContainerInterface::class
+            ) {
+                return \$this;
+            }
+
             if (isset(\$this->resolving[\$id])) {
                 \$chain = array_keys(\$this->resolving);
                 \$chain[] = \$id;
@@ -231,7 +238,15 @@ final class CoreContainerGenerator
 
         $class->addMethod('has')
             ->setReturnType('bool')
-            ->setBody($body)
+            ->setBody(<<<'PHP'
+                if (
+                    $id === \Maduser\Argon\Container\ArgonContainer::class
+                    || $id === \Psr\Container\ContainerInterface::class
+                ) {
+                    return true;
+                }
+
+            PHP . $body)
             ->addParameter('id')->setType('string');
     }
 

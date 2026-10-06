@@ -15,12 +15,14 @@ use ArrayIterator;
 use DomainException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 use ReflectionException;
 use ReflectionMethod;
 use RuntimeException;
 use stdClass;
 use TypeError;
 use Tests\Integration\Compiler\Mocks\SelfDependent;
+use Tests\Integration\Compiler\Mocks\ContainerConsumer;
 use Tests\Integration\Compiler\Mocks\DefaultValueService;
 use Tests\Integration\Compiler\Mocks\CyclicFactory;
 use Tests\Integration\Compiler\Mocks\CyclicPreInterceptor;
@@ -661,14 +663,26 @@ final class ContainerCompilerTest extends TestCase
      * @throws ContainerException
      * @throws NotFoundException
      */
-    public function testCompiledContainerResolvesSelf(): void
+    #[DataProvider('invocationModes')]
+    public function testCompiledContainerResolvesSelf(bool $strict): void
     {
-        $container = new ArgonContainer();
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(ContainerConsumer::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'SelfBindings_' . (int) $strict);
 
-        $compiled = $this->compileAndLoadContainer($container, 'testCompiledContainerResolvesSelf');
+        foreach ([$runtime, $compiled] as $container) {
+            foreach ([ArgonContainer::class, ContainerInterface::class] as $id) {
+                self::assertTrue($container->has($id));
+                self::assertSame($container, $container->get($id));
+                self::assertSame($container, $container->get($id, ['ignored' => true]));
+                self::assertSame($container, $container->optional($id));
+            }
 
-        $this->assertInstanceOf(ArgonContainer::class, $compiled->get(ArgonContainer::class));
-        $this->assertSame($compiled, $compiled->get(ArgonContainer::class));
+            $consumer = $container->get(ContainerConsumer::class);
+            self::assertSame($container, $consumer->argon);
+            self::assertSame($container, $consumer->psr);
+            self::assertSame($container, $container->invoke(static fn(ContainerInterface $psr) => $psr));
+        }
     }
 
     /**

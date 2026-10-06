@@ -27,6 +27,11 @@ Dynamic mode (default) prefers explicit bindings but can autowire instantiable c
 
 Strictness can be enforced at runtime or baked into the compiled container.
 
+`ArgonContainer::class` and `Psr\Container\ContainerInterface::class` are built-in
+self bindings: `has()` returns true and `get()` returns the current container,
+including in strict compiled mode. Services can depend on either type without
+registering another binding.
+
 ---
 ## Installation
 
