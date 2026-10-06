@@ -21,22 +21,21 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - php-version: '8.2'
-            experimental: false
+            static-analysis: true
             composer-options: ''
           - php-version: '8.3'
-            experimental: false
+            static-analysis: true
             composer-options: ''
           - php-version: '8.4'
-            experimental: false
+            static-analysis: true
             composer-options: ''
           - php-version: '8.5'
-            experimental: true
+            static-analysis: false
             composer-options: '--ignore-platform-req=php'
 
     steps:
@@ -73,11 +72,11 @@ jobs:
       run: vendor/bin/phpunit --coverage-clover=coverage.xml
 
     - name: Run Psalm
-      if: matrix.experimental == false
+      if: matrix.static-analysis
       run: vendor/bin/psalm --output-format=github --shepherd
 
     - name: Run PHP_CodeSniffer
-      if: matrix.experimental == false
+      if: matrix.static-analysis
       run: vendor/bin/phpcs --standard=phpcs.xml
 
     - name: Upload coverage reports to Codecov
@@ -85,4 +84,4 @@ jobs:
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        slug: judus/argon
+        slug: judus/argon-container

@@ -6,6 +6,8 @@ All notable changes to `maduser/argon-container` will be documented in this file
 
 ### Fixed
 
+- PHP 8.5 CI test failures now fail the build; static analysis remains on PHP 8.2-8.4 while the locked tooling requires a PHP platform override on 8.5.
+- Updated the Codecov upload slug to the renamed `judus/argon-container` repository.
 - Removed the non-enforcing php-cs-fixer CI step so PHPCS/Slevomat remains the single enforced style gate.
 - Removed the duplicate lowercase `readme.md` and kept the full package documentation as `README.md`.
 
