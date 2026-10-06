@@ -6,6 +6,7 @@ namespace Maduser\Argon\Container\Compiler;
 
 use Maduser\Argon\Container\ArgonContainer;
 use Maduser\Argon\Container\Exceptions\NotFoundException;
+use Maduser\Argon\Container\Support\CallableInvoker;
 use Nette\PhpGenerator\ClassType;
 
 final class CoreContainerGenerator
@@ -221,6 +222,11 @@ final class CoreContainerGenerator
 
     private function generateInvokeMethod(ClassType $class): void
     {
+        $class->addProperty('callableInvoker')
+            ->setPrivate()
+            ->setType('?' . CallableInvoker::class)
+            ->setValue(null);
+
         $invoke = $class->addMethod('invoke')
             ->setPublic()
             ->setReturnType('mixed');
@@ -228,107 +234,24 @@ final class CoreContainerGenerator
         $invoke->addParameter('target')->setType('callable|object|array|string');
         $invoke->addParameter('arguments')->setType('array')->setDefaultValue([]);
 
-        $lenientBody = <<<'PHP'
-        if (is_callable($target) && !is_array($target)) {
-            $reflection = new \ReflectionFunction($target);
-            $instance = null;
-        } elseif (is_array($target) && count($target) === 2) {
-            [$controller, $method] = $target;
-            $instance = is_object($controller) ? $controller : $this->get($controller);
-            $reflection = new \ReflectionMethod($instance, $method);
-        } else {
-            $instance = is_object($target) ? $target : $this->get($target);
-            $reflection = new \ReflectionMethod($instance, '__invoke');
-        }
-
-        $params = [];
-
-        foreach ($reflection->getParameters() as $param) {
-            $name = $param->getName();
-            $type = $param->getType()?->getName();
-
-            if (array_key_exists($name, $arguments)) {
-                $params[] = $arguments[$name];
-                continue;
+        $invoke->setBody(<<<'PHP'
+            if ($this->callableInvoker === null) {
+                $bindings = $this->getContextualBindings();
+                $resolver = new \Maduser\Argon\Container\Support\ContainerServiceResolver($this);
+                $argumentResolver = new \Maduser\Argon\Container\ArgumentResolver(
+                    new \Maduser\Argon\Container\ContextualResolver($this, $bindings),
+                    new \Maduser\Argon\Container\ArgumentMap(),
+                    $bindings
+                );
+                $argumentResolver->setServiceResolver($resolver);
+                $this->callableInvoker = new \Maduser\Argon\Container\Support\CallableInvoker(
+                    $resolver,
+                    $argumentResolver
+                );
             }
 
-            if ($type && $this->has($type)) {
-                $params[] = $this->get($type);
-                continue;
-            }
-
-            if ($type && class_exists($type)) {
-                if ($param->allowsNull()) {
-                    $params[] = null;
-                    continue;
-                }
-
-                $params[] = $this->get($type);
-                continue;
-            }
-
-            if ($param->isDefaultValueAvailable()) {
-                $params[] = $param->getDefaultValue();
-                continue;
-            }
-
-            if ($param->allowsNull()) {
-                $params[] = null;
-                continue;
-            }
-
-            throw new \RuntimeException("Unable to resolve parameter '{$name}' for '{$reflection->getName()}'");
-        }
-
-        return $reflection->invokeArgs($instance, $params);
-    PHP;
-
-        $strictBody = <<<'PHP'
-        if (is_callable($target) && !is_array($target)) {
-            $reflection = new \ReflectionFunction($target);
-            $instance = null;
-        } elseif (is_array($target) && count($target) === 2) {
-            [$controller, $method] = $target;
-            $instance = is_object($controller) ? $controller : $this->get($controller);
-            $reflection = new \ReflectionMethod($instance, $method);
-        } else {
-            $instance = is_object($target) ? $target : $this->get($target);
-            $reflection = new \ReflectionMethod($instance, '__invoke');
-        }
-
-        $params = [];
-
-        foreach ($reflection->getParameters() as $param) {
-            $name = $param->getName();
-            $type = $param->getType()?->getName();
-
-            if (array_key_exists($name, $arguments)) {
-                $params[] = $arguments[$name];
-                continue;
-            }
-
-            if ($type && $this->has($type)) {
-                $params[] = $this->get($type);
-                continue;
-            }
-
-            if ($param->isDefaultValueAvailable()) {
-                $params[] = $param->getDefaultValue();
-                continue;
-            }
-
-            if ($param->allowsNull()) {
-                $params[] = null;
-                continue;
-            }
-
-            throw new NotFoundException($name, 'compiled invoke');
-        }
-
-        return $reflection->invokeArgs($instance, $params);
-    PHP;
-
-        $invoke->setBody($this->strictMode ? $strictBody : $lenientBody);
+            return $this->callableInvoker->call($target, $arguments);
+        PHP);
     }
 
     private function generateInvokeServiceMethod(ClassType $class): void

@@ -6,6 +6,7 @@ All notable changes to `maduser/argon-container` will be documented in this file
 
 ### Fixed
 
+- Compiled `invoke()` now uses the runtime callable and argument resolvers, preserving callable forms, explicit union/intersection arguments, nullable/default values, contextual bindings registered on the compiled instance, and compiled dependency identity.
 - PHP 8.5 CI test failures now fail the build; static analysis remains on PHP 8.2-8.4 while the locked tooling requires a PHP platform override on 8.5.
 - Updated the Codecov upload slug to the renamed `judus/argon-container` repository.
 - Removed the non-enforcing php-cs-fixer CI step so PHPCS/Slevomat remains the single enforced style gate.

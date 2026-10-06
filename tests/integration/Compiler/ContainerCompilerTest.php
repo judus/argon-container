@@ -11,6 +11,9 @@ use Maduser\Argon\Container\Exceptions\ContainerException;
 use Maduser\Argon\Container\Exceptions\NotFoundException;
 use Maduser\Argon\Container\Support\ReflectionUtils;
 use Maduser\Argon\Container\Support\ServiceInvoker;
+use ArrayIterator;
+use DomainException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionException;
 use ReflectionMethod;
@@ -19,6 +22,7 @@ use stdClass;
 use Tests\Integration\Compiler\Mocks\DefaultValueService;
 use Tests\Integration\Compiler\Mocks\DependentLoggerInterceptor;
 use Tests\Integration\Compiler\Mocks\ImplicitNullable;
+use Tests\Integration\Compiler\Mocks\InvocationTarget;
 use Tests\Integration\Compiler\Mocks\Logger;
 use Tests\Integration\Compiler\Mocks\LoggerInterceptor;
 use Tests\Integration\Compiler\Mocks\Mailer;
@@ -48,6 +52,126 @@ use Tests\Mocks\DummyProvider;
 final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
+
+    /** @return iterable<string, array{bool, string}> */
+    public static function callableCases(): iterable
+    {
+        foreach ([false, true] as $strict) {
+            foreach (
+                [
+                'closure', 'zero-closure', 'function', 'object', 'class',
+                'object-method', 'class-method', 'static-string', 'static-array', 'method-string',
+                ] as $form
+            ) {
+                yield ($strict ? 'strict-' : 'dynamic-') . $form => [$strict, $form];
+            }
+        }
+    }
+
+    #[DataProvider('callableCases')]
+    public function testCompiledCallableFormsMatchRuntime(bool $strict, string $form): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(InvocationTarget::class, args: ['prefix' => 'configured']);
+        $compiled = $this->compileAndLoadContainer(
+            $runtime,
+            'Callable_' . ($strict ? 'strict_' : 'dynamic_') . str_replace('-', '_', $form)
+        );
+        $target = match ($form) {
+            'closure' => static fn(string $value): string => 'closure:' . $value,
+            'zero-closure' => static fn(): string => 'no arguments',
+            'function' => 'strtoupper',
+            'object' => new InvocationTarget('object'),
+            'class' => InvocationTarget::class,
+            'object-method' => [new InvocationTarget('object'), '__invoke'],
+            'class-method' => [InvocationTarget::class, '__invoke'],
+            'static-string' => InvocationTarget::class . '::staticMethod',
+            'static-array' => [InvocationTarget::class, 'staticMethod'],
+            'method-string' => InvocationTarget::class . '::__invoke',
+        };
+        $args = $form === 'function' ? ['string' => 'hello'] : ['value' => 'hello'];
+
+        self::assertSame($runtime->invoke($target, $args), $compiled->invoke($target, $args));
+    }
+
+    /** @return iterable<string, array{bool}> */
+    public static function invocationModes(): iterable
+    {
+        yield 'dynamic' => [false];
+        yield 'strict' => [true];
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledInvocationArgumentsMatchRuntime(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(LoggerInterface::class, Logger::class);
+        $runtime->set(CustomLogger::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'InvocationArguments_' . (int) $strict);
+        $target = new InvocationTarget();
+        $iterator = new ArrayIterator(['one', 'two']);
+
+        foreach (
+            [
+            ['union', ['value' => 7]],
+            ['union', ['value' => 'seven']],
+            ['intersection', ['value' => $iterator]],
+            ['nullable', []],
+            ['nullable', ['logger' => null]],
+            ['defaults', []],
+            ['defaults', ['number' => '12', 'text' => null]],
+            ] as [$method, $args]
+        ) {
+            self::assertSame(
+                $runtime->invoke([$target, $method], $args),
+                $compiled->invoke([$target, $method], $args)
+            );
+        }
+
+        foreach ([$runtime, $compiled] as $container) {
+            self::assertSame(
+                $container->get(LoggerInterface::class),
+                $container->invoke([$target, 'dependency'])
+            );
+            self::assertSame(
+                $container->get(LoggerInterface::class),
+                $container->invoke(static fn(LoggerInterface $logger): LoggerInterface => $logger)
+            );
+            $explicit = new CustomLogger();
+            self::assertSame($explicit, $container->invoke([$target, 'nullable'], ['logger' => $explicit]));
+            self::assertSame(
+                $container->get(CustomLogger::class),
+                $container->invoke([$target, 'nullable'], ['logger' => CustomLogger::class])
+            );
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledInvocationUsesCurrentContextualBindings(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(CustomLogger::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'InvocationContext_' . (int) $strict);
+
+        foreach ([$runtime, $compiled] as $container) {
+            $target = new InvocationTarget();
+            self::assertNull($container->invoke([$target, 'nullable']));
+            $container->for(InvocationTarget::class . '::nullable')->set(LoggerInterface::class, CustomLogger::class);
+            self::assertSame($container->get(CustomLogger::class), $container->invoke([$target, 'nullable']));
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledInvocationPropagatesApplicationExceptions(bool $strict): void
+    {
+        $compiled = $this->compileAndLoadContainer(
+            new ArgonContainer(strictMode: $strict),
+            'InvocationException_' . (int) $strict
+        );
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('application failure');
+        $compiled->invoke([new InvocationTarget(), 'fail']);
+    }
 
     #[\Override]
     public static function setUpBeforeClass(): void
