@@ -1,12 +1,21 @@
 # Changelog
 
-All notable changes to `maduser/argon` will be documented in this file.
+All notable changes to `maduser/argon-container` will be documented in this file.
 
 ## [Unreleased]
 
 ### Fixed
 
 - Removed the non-enforcing php-cs-fixer CI step so PHPCS/Slevomat remains the single enforced style gate.
+- Removed the duplicate lowercase `readme.md` and kept the full package documentation as `README.md`.
+
+## [1.3.0] - 2026-05-24
+
+### Changed
+
+- Renamed the Composer package from `maduser/argon` to `maduser/argon-container`.
+- Added temporary Composer replacement metadata for `maduser/argon`.
+- Updated repository, Packagist, and documentation references for the container package identity.
 
 ## [1.2.0] - 2026-05-21
 

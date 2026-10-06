@@ -1,5 +1,5 @@
 {
-  "name": "maduser/argon",
+  "name": "maduser/argon-container",
   "description": "A high-performance, modular, PSR-11 compliant dependency injection container for PHP.",
   "type": "library",
   "license": "MIT",
@@ -13,6 +13,9 @@
     "php": "^8.2",
     "nette/php-generator": "^4.2",
     "psr/container": "^2.0"
+  },
+  "replace": {
+    "maduser/argon": "self.version"
   },
   "require-dev": {
     "dealerdirect/phpcodesniffer-composer-installer": "^1.1",
