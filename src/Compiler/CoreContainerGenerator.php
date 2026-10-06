@@ -42,7 +42,20 @@ final class CoreContainerGenerator
         if ($this->strictMode) {
             $constructor->addBody('parent::__construct(strictMode: true);');
         } else {
-            $constructor->addBody('parent::__construct();');
+            $constructor->addBody(<<<'PHP'
+                $bindings = new \Maduser\Argon\Container\ContextualBindings();
+                $argumentResolver = new \Maduser\Argon\Container\ArgumentResolver(
+                    new \Maduser\Argon\Container\ContextualResolver($this, $bindings),
+                    new \Maduser\Argon\Container\ArgumentMap(),
+                    $bindings
+                );
+                parent::__construct(contextualRegistry: $bindings, argumentResolver: $argumentResolver);
+
+                // Fallback construction must resolve dependencies through the compiled graph.
+                $argumentResolver->setServiceResolver(
+                    new \Maduser\Argon\Container\Support\ContainerServiceResolver($this)
+                );
+            PHP);
         }
 
         $parameterStore = $this->container->getParameters()->all();

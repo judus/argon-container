@@ -20,6 +20,7 @@ use ReflectionMethod;
 use RuntimeException;
 use stdClass;
 use Tests\Integration\Compiler\Mocks\DefaultValueService;
+use Tests\Integration\Compiler\Mocks\FallbackConsumer;
 use Tests\Integration\Compiler\Mocks\DependentLoggerInterceptor;
 use Tests\Integration\Compiler\Mocks\ImplicitNullable;
 use Tests\Integration\Compiler\Mocks\InvocationTarget;
@@ -52,6 +53,93 @@ use Tests\Mocks\DummyProvider;
 final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
+
+    /** @return iterable<string, array{bool}> */
+    public static function fallbackLifecycles(): iterable
+    {
+        yield 'shared' => [true];
+        yield 'transient' => [false];
+    }
+
+    #[DataProvider('fallbackLifecycles')]
+    public function testDynamicFallbackUsesCompiledDependencies(bool $shared): void
+    {
+        $runtime = new ArgonContainer();
+        $runtime->set(LoggerInterface::class, Logger::class);
+        $runtime->set(Logger::class);
+        $runtime->set(PrimitiveService::class, args: ['path' => '/configured']);
+        $runtime->set(StatefulDefaultValueFactory::class, args: ['label' => 'factory']);
+        $runtime->set(DefaultValueService::class, args: ['label' => 'product'])
+            ->factory(StatefulDefaultValueFactory::class, 'create');
+        if (!$shared) {
+            $runtime->set(Logger::class)->transient();
+        }
+        $compiled = $this->compileAndLoadContainer($runtime, 'FallbackDependencies_' . (int) $shared);
+
+        foreach ([$runtime, $compiled] as $container) {
+            $first = $container->get(FallbackConsumer::class);
+            $second = $container->get(FallbackConsumer::class);
+
+            self::assertNotSame($first, $second);
+            self::assertNotSame($first->nested, $second->nested);
+            self::assertSame($container->get(LoggerInterface::class), $first->nested->logger);
+            self::assertSame($first->nested->logger, $second->nested->logger);
+            self::assertSame('/configured', $first->configured->path);
+            self::assertSame($container->get(PrimitiveService::class), $first->configured);
+            self::assertSame('factory:product', $first->product->label);
+            self::assertSame($container->get(DefaultValueService::class), $first->product);
+            self::assertSame($shared, $first->logger === $second->logger);
+            self::assertSame($shared, $first->logger === $container->get(Logger::class));
+        }
+    }
+
+    public function testFallbackConcreteDependencyKeepsCompiledSingleton(): void
+    {
+        $runtime = new ArgonContainer();
+        $runtime->set(Logger::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'FallbackConcreteSingleton');
+
+        foreach ([$runtime, $compiled] as $container) {
+            $logger = $container->get(Logger::class);
+            self::assertSame($logger, $container->get(Mailer::class)->logger);
+        }
+    }
+
+    public function testBootClosureCanConsumeCompiledDependency(): void
+    {
+        $runtime = new ArgonContainer();
+        $runtime->set(LoggerInterface::class, Logger::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'BootClosureCompiledDependency');
+
+        foreach ([$runtime, $compiled] as $container) {
+            $container->set(
+                'boot.consumer',
+                static fn(LoggerInterface $logger): NeedsLogger => new NeedsLogger($logger)
+            );
+            $consumer = $container->get('boot.consumer');
+            self::assertInstanceOf(NeedsLogger::class, $consumer);
+            self::assertSame($container->get(LoggerInterface::class), $consumer->logger);
+        }
+    }
+
+    public function testFallbackHonorsExplicitAndLiveContextualDependencies(): void
+    {
+        $runtime = new ArgonContainer();
+        $runtime->set(LoggerInterface::class, Logger::class);
+        $runtime->set(CustomLogger::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'FallbackOverrides');
+
+        foreach ([$runtime, $compiled] as $container) {
+            $explicit = new CustomLogger();
+            self::assertSame($explicit, $container->get(NeedsLogger::class, ['logger' => $explicit])->logger);
+            self::assertSame(
+                $container->get(CustomLogger::class),
+                $container->get(NeedsLogger::class, ['logger' => CustomLogger::class])->logger
+            );
+            $container->for(NeedsLogger::class)->set(LoggerInterface::class, CustomLogger::class);
+            self::assertSame($container->get(CustomLogger::class), $container->get(NeedsLogger::class)->logger);
+        }
+    }
 
     /** @return iterable<string, array{bool, string}> */
     public static function callableCases(): iterable
