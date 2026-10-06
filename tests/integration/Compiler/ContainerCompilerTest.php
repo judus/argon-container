@@ -878,6 +878,63 @@ final class ContainerCompilerTest extends TestCase
         $this->assertInstanceOf(Mailer::class, $mailers[0]);
     }
 
+    #[DataProvider('invocationModes')]
+    public function testCompiledInspectionRecognizesBindings(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(LoggerInterface::class, AutowireLogger::class);
+        $runtime->set('named-service', Logger::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'Inspection_' . (int) $strict);
+
+        foreach ([$runtime, $compiled] as $container) {
+            $ids = [LoggerInterface::class, 'named-service', ArgonContainer::class, ContainerInterface::class];
+            foreach ($ids as $id) {
+                self::assertTrue($container->isResolvable($id));
+            }
+            self::assertFalse($container->isResolvable('missing-service'));
+            self::assertFalse($container->isResolvable(SomeInterface::class));
+            self::assertSame(!$strict, $container->isResolvable(stdClass::class));
+            self::assertFalse($container->has(stdClass::class));
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledTagReadsAndWritesShareState(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(Logger::class)->tag(['group' => ['priority' => 1]]);
+        $runtime->set(Mailer::class)->tag('group');
+        $compiled = $this->compileAndLoadContainer($runtime, 'TagState_' . (int) $strict);
+        self::assertSame($runtime->getTags(), $compiled->getTags());
+        self::assertSame($runtime->getTags(true), $compiled->getTags(true));
+
+        foreach ([$runtime, $compiled] as $container) {
+            $container->tag(Logger::class, ['group' => ['priority' => 2], 'late']);
+            self::assertSame(['priority' => 2], $container->getTaggedMeta('group')[Logger::class]);
+            $container->tag(Mailer::class, ['late' => ['source' => 'boot']]);
+            $container->tag(Logger::class, ['group']);
+            self::assertSame([Logger::class, Mailer::class], $container->getTaggedIds('late'));
+            self::assertSame([
+                Logger::class => [],
+                Mailer::class => ['source' => 'boot'],
+            ], $container->getTaggedMeta('late'));
+            self::assertSame([Logger::class => [], Mailer::class => []], $container->getTaggedMeta('group'));
+            self::assertSame([
+                $container->get(Logger::class), $container->get(Mailer::class),
+            ], $container->getTagged('late'));
+            self::assertSame([], $container->getTagged('absent'));
+            self::assertSame([], $container->getTaggedIds('absent'));
+            self::assertSame([], $container->getTaggedMeta('absent'));
+            $container->set('late-binding', Logger::class)->tag('builder');
+            self::assertSame(['late-binding'], $container->getTaggedIds('builder'));
+            if (!$strict) {
+                self::assertSame([$container->get('late-binding')], $container->getTagged('builder'));
+            }
+        }
+        self::assertSame($runtime->getTags(), $compiled->getTags());
+        self::assertSame($runtime->getTags(true), $compiled->getTags(true));
+    }
+
     /**
      * @throws ContainerException
      * @throws NotFoundException

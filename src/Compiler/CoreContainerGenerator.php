@@ -27,10 +27,8 @@ final class CoreContainerGenerator
         $this->generateInterceptorMethods($class);
         $this->generateObjectResultValidationMethod($class);
         $this->generateHasMethod($class);
+        $this->generateIsResolvableMethod($class);
         $this->generateGetMethod($class);
-        $this->generateGetTaggedMethod($class);
-        $this->generateGetTaggedIdsMethod($class);
-        $this->generateGetTaggedMetaMethod($class);
         $this->generateInvokeMethod($class);
         $this->generateInvokeServiceMethod($class);
         $this->generateBuildCompiledInvokerMethodName($class);
@@ -63,12 +61,17 @@ final class CoreContainerGenerator
             $formatted = var_export($parameterStore, true);
             $constructor->addBody("\$this->getParameters()->setStore({$formatted});");
         }
+
+        foreach ($this->container->getTags(true) as $tag => $services) {
+            foreach ($services as $id => $metadata) {
+                $constructor->addBody('$this->tag(?, ?);', [$id, [$tag => $metadata]]);
+            }
+        }
     }
 
     private function generateCoreProperties(ClassType $class): void
     {
         $class->addProperty('resolving')->setPrivate()->setType('array')->setValue([]);
-        $class->addProperty('tagMap')->setPrivate()->setValue($this->container->getTags(true));
         $class->addProperty('parameters')->setPrivate()->setValue($this->container->getParameters()->all());
 
         $class->addProperty('preInterceptors')->setPrivate()->setValue(array_map(
@@ -193,41 +196,12 @@ final class CoreContainerGenerator
         $method->addParameter('args')->setType('array')->setDefaultValue([]);
     }
 
-    private function generateGetTaggedMethod(ClassType $class): void
+    private function generateIsResolvableMethod(ClassType $class): void
     {
-        $class->addMethod('getTagged')
-            ->setReturnType('array')
-            ->setBody(<<<'PHP'
-            if (!isset($this->tagMap[$tag])) {
-                return [];
-            }
-
-            $results = [];
-            foreach (array_keys($this->tagMap[$tag]) as $id) {
-                $results[] = $this->get($id);
-            }
-
-            return $results;
-        PHP)
-            ->addParameter('tag')->setType('string');
-    }
-
-    private function generateGetTaggedIdsMethod(ClassType $class): void
-    {
-        $class->addMethod('getTaggedIds')
-            ->setReturnType('array')
-            ->setBody('return array_keys($this->tagMap[$tag] ?? []);')
-            ->addParameter('tag')->setType('string');
-    }
-
-    private function generateGetTaggedMetaMethod(ClassType $class): void
-    {
-        $class->addMethod('getTaggedMeta')
-            ->setReturnType('array')
-            ->setBody(<<<'PHP'
-            return $this->tagMap[$tag] ?? [];
-        PHP)
-            ->addParameter('tag')->setType('string');
+        $class->addMethod('isResolvable')
+            ->setReturnType('bool')
+            ->setBody('return isset($this->serviceMap[$id]) || parent::isResolvable($id);')
+            ->addParameter('id')->setType('string');
     }
 
     private function generateHasMethod(ClassType $class): void

@@ -396,6 +396,10 @@ currently replaces it with the decorated object for future resolutions.
 
 ### Tags
 
+Compiled containers retain their tag snapshot and use the same tag registry for
+later `tag()` calls and all tag queries. Updating tags does not replace bindings
+or change how services are constructed.
+
 ```php
 $container->tag(FileLogger::class, ['loggers', 'file']);
 $container->tag(DatabaseLogger::class, ['loggers', 'db']);
