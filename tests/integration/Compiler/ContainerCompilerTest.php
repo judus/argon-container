@@ -63,6 +63,78 @@ final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
 
+    /** @return iterable<string, array{bool, string, mixed, bool}> */
+    public static function numericInvocationCases(): iterable
+    {
+        $cases = [
+            'integer' => ['id', 42, true],
+            'numeric-string' => ['id', '42', true],
+            'negative-string' => ['id', '-42', true],
+            'whitespace' => ['id', ' 42 ', true],
+            'exponent' => ['id', '4.2e1', true],
+            'integral-float' => ['id', 42.0, true],
+            'boolean' => ['id', true, true],
+            'max-int' => ['id', (string) PHP_INT_MAX, true],
+            'min-int' => ['id', (string) PHP_INT_MIN, true],
+            'invalid-integer' => ['id', 'bad', false],
+            'numeric-prefix' => ['id', '42bad', false],
+            'empty-string' => ['id', '', false],
+            'overflow-string' => ['id', '1e100', false],
+            'overflow-float' => ['id', 1e100, false],
+            'infinite-integer' => ['id', INF, false],
+            'array-integer' => ['id', [], false],
+            'object-integer' => ['id', new stdClass(), false],
+            'null-integer' => ['id', null, false],
+            'float' => ['ratio', 3.5, true],
+            'numeric-float-string' => ['ratio', '3.5', true],
+            'float-exponent' => ['ratio', '3.5e2', true],
+            'infinite-float' => ['ratio', INF, true],
+            'invalid-float' => ['ratio', 'bad', false],
+            'array-float' => ['ratio', [], false],
+            'object-float' => ['ratio', new stdClass(), false],
+            'null-float' => ['ratio', null, false],
+        ];
+        foreach ([false, true] as $strict) {
+            foreach ($cases as $name => [$parameter, $value, $accepted]) {
+                yield ($strict ? 'strict-' : 'dynamic-') . $name => [$strict, $parameter, $value, $accepted];
+            }
+        }
+    }
+
+    #[DataProvider('numericInvocationCases')]
+    public function testCompiledNumericInvocationMatchesRuntime(
+        bool $strict,
+        string $parameter,
+        mixed $value,
+        bool $accepted
+    ): void {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(Logger::class);
+        $runtime->set(RouteStyleController::class)->defineInvocation(
+            'typed',
+            ReflectionUtils::getMethodParameters(RouteStyleController::class, 'typed')
+        );
+        $compiled = $this->compileAndLoadContainer($runtime, 'NumericInvocation_' . bin2hex(random_bytes(6)));
+        $arguments = array_replace(['id' => '42'], [$parameter => $value]);
+        $results = [];
+
+        foreach ([$runtime, $compiled] as $container) {
+            $controller = $container->get(RouteStyleController::class);
+            $invoker = new ServiceInvoker($container, RouteStyleController::class, 'typed');
+            $rejected = false;
+            try {
+                $results[] = $invoker($arguments);
+            } catch (TypeError) {
+                $rejected = true;
+            }
+            self::assertSame(!$accepted, $rejected, 'Invalid input must be rejected before the handler executes.');
+            self::assertSame($accepted ? 1 : 0, $controller->calls);
+        }
+        if ($accepted) {
+            self::assertSame($results[0], $results[1]);
+        }
+    }
+
     /** @return iterable<string, array{string, string, bool}> */
     public static function cycleCases(): iterable
     {

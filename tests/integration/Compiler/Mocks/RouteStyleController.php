@@ -6,6 +6,8 @@ namespace Tests\Integration\Compiler\Mocks;
 
 final class RouteStyleController
 {
+    public int $calls = 0;
+
     public function show(Logger $logger, string $id): array
     {
         return [
@@ -16,6 +18,7 @@ final class RouteStyleController
 
     public function typed(Logger $logger, int $id, float $ratio = 1.5): array
     {
+        $this->calls++;
         return [
             'id' => $id,
             'ratio' => $ratio,

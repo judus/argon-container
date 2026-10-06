@@ -14,7 +14,7 @@ use Tests\Unit\Container\Compiler\Stubs\ServiceWithTypedMethods;
 
 final class ServiceInvocationGeneratorTest extends TestCase
 {
-    public function testGenerateCreatesInvokerWithCastsAndServiceReferences(): void
+    public function testGenerateCreatesInvokerWithNativeCoercionAndServiceReferences(): void
     {
         $container = new ArgonContainer();
         $container->set(ServiceWithTypedMethods::class)
@@ -50,8 +50,13 @@ final class ServiceInvocationGeneratorTest extends TestCase
         $escapedServiceClass = str_replace('\\', '\\\\', ServiceWithTypedMethods::class);
         self::assertStringContainsString("\$controller = \$this->get('{$escapedServiceClass}');", $body);
         self::assertStringContainsString("\$this->get('dependency.service')", $body);
-        self::assertStringContainsString("(int) \$mergedArgs['id']", $body);
-        self::assertStringContainsString("(float) \$mergedArgs['ratio']", $body);
+        self::assertStringNotContainsString('(int)', $body);
+        self::assertStringNotContainsString('(float)', $body);
+        self::assertStringNotContainsString('Reflection', $body);
+        self::assertStringContainsString(
+            'CompiledCallableInvoker::invoke($controller->handle(...), $mergedArgs)',
+            $body
+        );
     }
 
     public function testGenerateSkipsDescriptorsExcludedFromCompilation(): void
@@ -87,7 +92,10 @@ final class ServiceInvocationGeneratorTest extends TestCase
         $method = $class->getMethod('invoke_closure_service__handle');
 
         self::assertStringNotContainsString('(int)', $method->getBody());
-        self::assertStringContainsString('return $controller->handle(...$mergedArgs);', $method->getBody());
+        self::assertStringContainsString(
+            'CompiledCallableInvoker::invoke($controller->handle(...)',
+            $method->getBody()
+        );
     }
 
     public function testGenerateOmitsPrimitiveCastsForUnknownInvocationMethod(): void
@@ -108,6 +116,9 @@ final class ServiceInvocationGeneratorTest extends TestCase
         $method = $class->getMethod($methodName);
 
         self::assertStringNotContainsString('(int)', $method->getBody());
-        self::assertStringContainsString('return $controller->missing(...$mergedArgs);', $method->getBody());
+        self::assertStringContainsString(
+            'CompiledCallableInvoker::invoke($controller->missing(...)',
+            $method->getBody()
+        );
     }
 }

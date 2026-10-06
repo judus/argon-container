@@ -13,6 +13,8 @@
 
     <!-- Strict types declaration -->
     <rule ref="SlevomatCodingStandard.TypeHints.DeclareStrictTypes">
+        <!-- Approved weak call boundary; all other source and tests remain strict. -->
+        <exclude-pattern>*/src/Support/CompiledCallableInvoker.php</exclude-pattern>
         <properties>
             <property name="spacesCountAroundEqualsSign" value="0"/>
         </properties>

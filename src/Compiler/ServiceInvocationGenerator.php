@@ -5,12 +5,8 @@ declare(strict_types=1);
 namespace Maduser\Argon\Container\Compiler;
 
 use Maduser\Argon\Container\ArgonContainer;
-use Maduser\Argon\Container\Contracts\ServiceDescriptorInterface;
 use Maduser\Argon\Container\Support\StringHelper;
 use Nette\PhpGenerator\ClassType;
-use ReflectionException;
-use ReflectionMethod;
-use ReflectionNamedType;
 
 final class ServiceInvocationGenerator
 {
@@ -41,7 +37,6 @@ final class ServiceInvocationGenerator
                     }
                 }
 
-                $casts = $this->buildPrimitiveCastLines($descriptor, $method);
                 $indent = str_repeat(' ', 20);
 
                 $lines = [
@@ -49,11 +44,8 @@ final class ServiceInvocationGenerator
                     $indent . '$mergedArgs = ' . 'array_merge([' . implode(", ", $compiledArgs) . '], $args);',
                 ];
 
-                foreach ($casts as $castLine) {
-                    $lines[] = $indent . $castLine;
-                }
-
-                $lines[] = $indent . "return \$controller->{$method}(...\$mergedArgs);";
+                $lines[] = $indent . 'return \\Maduser\\Argon\\Container\\Support\\CompiledCallableInvoker::invoke('
+                    . "\$controller->{$method}(...), \$mergedArgs);";
 
                 $body = implode("\n", $lines);
 
@@ -72,50 +64,5 @@ final class ServiceInvocationGenerator
         $sanitizedMethod  = StringHelper::sanitizeIdentifier($method);
 
         return 'invoke_' . $sanitizedService . '__' . $sanitizedMethod;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function buildPrimitiveCastLines(ServiceDescriptorInterface $descriptor, string $method): array
-    {
-        $concrete = $descriptor->getConcrete();
-
-        if (!is_string($concrete) || !class_exists($concrete)) {
-            return [];
-        }
-
-        try {
-            $reflection = new ReflectionMethod($concrete, $method);
-        } catch (ReflectionException) {
-            return [];
-        }
-
-        $casts = [];
-
-        foreach ($reflection->getParameters() as $parameter) {
-            $type = $parameter->getType();
-
-            if (!$type instanceof ReflectionNamedType || !$type->isBuiltin()) {
-                continue;
-            }
-
-            $name = $parameter->getName();
-            $condition = "array_key_exists('{$name}', \$mergedArgs) && \$mergedArgs['{$name}'] !== null";
-
-            switch ($type->getName()) {
-                case 'int':
-                    $casts[] = "if ({$condition}) { \$mergedArgs['{$name}'] = (int) \$mergedArgs['{$name}']; }";
-                    break;
-                case 'float':
-                case 'double':
-                    $casts[] = "if ({$condition}) { \$mergedArgs['{$name}'] = (float) \$mergedArgs['{$name}']; }";
-                    break;
-                default:
-                    break;
-            }
-        }
-
-        return $casts;
     }
 }
