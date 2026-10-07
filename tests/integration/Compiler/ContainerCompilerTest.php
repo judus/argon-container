@@ -29,6 +29,8 @@ use Tests\Integration\Compiler\Mocks\AliasLeaf;
 use Tests\Integration\Compiler\Mocks\AliasFactory;
 use Tests\Integration\Compiler\Mocks\AliasCycleInterceptor;
 use Tests\Integration\Compiler\Mocks\AliasContract;
+use Tests\Integration\Compiler\Mocks\ContextualFactory;
+use Tests\Integration\Compiler\Mocks\ContextualFactoryMethods;
 use Tests\Integration\Compiler\Mocks\DefaultValueService;
 use Tests\Integration\Compiler\Mocks\CyclicFactory;
 use Tests\Integration\Compiler\Mocks\CyclicPreInterceptor;
@@ -70,6 +72,64 @@ use Tests\Mocks\DummyProvider;
 final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
+
+    /** @return iterable<string, array{bool, string}> */
+    public static function factoryContextCases(): iterable
+    {
+        foreach ([false, true] as $strict) {
+            foreach (['__invoke', 'make', 'create'] as $method) {
+                yield (int) $strict . '_' . $method => [$strict, $method];
+            }
+        }
+    }
+
+    #[DataProvider('factoryContextCases')]
+    public function testFactoryContextMatchesRuntime(bool $strict, string $method): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(Logger::class);
+        $runtime->set(CustomLogger::class);
+        $runtime->set(ContextualFactory::class);
+        $runtime->set(LoggerInterface::class, CustomLogger::class);
+        $runtime->set('unscoped', AliasLeaf::class)->factory(ContextualFactory::class, $method)->transient();
+        $runtime->for(ContextualFactory::class)->set(LoggerInterface::class, Logger::class);
+        $runtime->for(ContextualFactoryMethods::class)->set(LoggerInterface::class, Logger::class);
+        foreach ([AliasLeaf::class, AliasContract::class, 'named'] as $id) {
+            $runtime->set($id, AliasLeaf::class)->factory(ContextualFactory::class, $method)->transient();
+            $runtime->for($id)->set(LoggerInterface::class, CustomLogger::class);
+        }
+        $runtime->set(AliasMiddle::class)->factory(ContextualFactory::class, $method)->transient();
+        $runtime->for(AliasMiddle::class)->set(LoggerInterface::class, Logger::class);
+        $runtime->set(AliasBase::class, AliasLeaf::class)->transient();
+        $runtime->set('alias', AliasBase::class)->transient();
+        $runtime->for(AliasBase::class)->set(LoggerInterface::class, Logger::class);
+        $runtime->for('alias')->set(LoggerInterface::class, Logger::class);
+        $runtime->set('bound', AliasBase::class, ['logger' => Logger::class, 'optional' => null])->transient();
+        $compiled = $this->compileAndLoadContainer($runtime, 'FactoryContext_' . (int) $strict . '_' . $method);
+
+        foreach ([$runtime, $compiled] as $container) {
+            foreach ([AliasLeaf::class, AliasContract::class, 'named', 'alias'] as $id) {
+                $product = $container->get($id);
+                self::assertInstanceOf(AliasLeaf::class, $product);
+                self::assertSame(CustomLogger::class, $product->label);
+                self::assertSame(CustomLogger::class, $product->nullable);
+            }
+            self::assertSame(Logger::class, $container->get(AliasMiddle::class)->label);
+            $unscoped = $container->get('unscoped');
+            self::assertInstanceOf(AliasLeaf::class, $unscoped);
+            self::assertSame(CustomLogger::class, $unscoped->label);
+            self::assertNull($unscoped->nullable);
+            self::assertSame($container->get(Logger::class), $container->get(ContextualFactory::class)->logger);
+            $bound = $container->get('bound');
+            self::assertInstanceOf(AliasLeaf::class, $bound);
+            self::assertSame(Logger::class, $bound->label);
+            self::assertNull($bound->nullable);
+            $override = $container->get('bound', ['logger' => CustomLogger::class, 'optional' => Logger::class]);
+            self::assertInstanceOf(AliasLeaf::class, $override);
+            self::assertSame(CustomLogger::class, $override->label);
+            self::assertSame(Logger::class, $override->nullable);
+        }
+    }
 
     /** @return iterable<string, array{bool, bool, bool, string}> */
     public static function aliasCases(): iterable

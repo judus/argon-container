@@ -216,6 +216,11 @@ The factory itself is resolved via the container and may define either an `__inv
 Arguments bound to the product service, or passed to `get()` for the product service, are applied to the factory
 method only. If the factory object needs configuration, bind the factory class itself with its own arguments.
 
+Contextual bindings for factory method arguments use the ID of the service binding
+that declares the factory, including when reached through an alias. The factory's
+constructor retains its own constructor context. These rules apply in both runtime
+and compiled containers.
+
 ```php
 $container->set(ClockInterface::class)
     ->factory(ClockFactory::class);

@@ -53,7 +53,7 @@ final class ParameterExpressionResolver
     }
 
     /**
-     * Resolves a constructor parameter for code generation in the compiled container.
+     * Resolves a constructor or factory parameter for code generation in the compiled container.
      *
      * @throws ContainerException
      */
@@ -71,6 +71,9 @@ final class ParameterExpressionResolver
                 return 'throw ContainerException::forCircularDependency('
                     . var_export($descriptor->id, true) . ', ' . var_export($descriptor->chain, true) . ')';
             }
+        }
+        if ($descriptor?->hasFactory()) {
+            $context = $descriptor->getId();
         }
         $boundArguments = $descriptor?->getArguments() ?? [];
         $plan = $this->planner->build(

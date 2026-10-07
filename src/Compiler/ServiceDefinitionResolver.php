@@ -43,7 +43,8 @@ final class ServiceDefinitionResolver
             return $descriptor;
         }
 
-        $resolved = new ServiceDescriptor($id, $current->getConcrete(), $descriptor->isShared(), $arguments);
+        // Keep the construction binding's identity for factory context; callers retain the requested cache ID.
+        $resolved = new ServiceDescriptor($currentId, $current->getConcrete(), $descriptor->isShared(), $arguments);
         $factory = $current->getFactoryClass();
         if ($factory !== null) {
             $resolved->setFactory($factory, $current->getFactoryMethod());
