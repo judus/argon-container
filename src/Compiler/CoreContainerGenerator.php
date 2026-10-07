@@ -37,8 +37,9 @@ final class CoreContainerGenerator
     private function generateConstructor(ClassType $class): void
     {
         $constructor = $class->addMethod('__construct')->setPublic();
+        $sharedByDefault = $this->container->isSharedByDefault();
         if ($this->strictMode) {
-            $constructor->addBody('parent::__construct(strictMode: true);');
+            $constructor->addBody('parent::__construct(strictMode: true, sharedByDefault: ?);', [$sharedByDefault]);
         } else {
             $constructor->addBody(<<<'PHP'
                 $bindings = new \Maduser\Argon\Container\ContextualBindings();
@@ -47,13 +48,17 @@ final class CoreContainerGenerator
                     new \Maduser\Argon\Container\ArgumentMap(),
                     $bindings
                 );
-                parent::__construct(contextualRegistry: $bindings, argumentResolver: $argumentResolver);
+                parent::__construct(
+                    contextualRegistry: $bindings,
+                    argumentResolver: $argumentResolver,
+                    sharedByDefault: ?
+                );
 
                 // Fallback construction must resolve dependencies through the compiled graph.
                 $argumentResolver->setServiceResolver(
                     new \Maduser\Argon\Container\Support\ContainerServiceResolver($this)
                 );
-            PHP);
+            PHP, [$sharedByDefault]);
         }
 
         $parameterStore = $this->container->getParameters()->all();

@@ -6,6 +6,7 @@ All notable changes to `maduser/argon-container` will be documented in this file
 
 ### Fixed
 
+- Compiled containers now preserve `sharedByDefault`, so default lifecycle inspection and subsequent registrations retain the source container's shared or transient default. Explicit per-binding lifecycle overrides are unchanged.
 - Compiled `isResolvable()` now recognizes compiled bindings while retaining the existing strict/dynamic inspection rules. Compiled tag snapshots and subsequent tag updates now share the runtime tag registry, keeping all tag queries consistent, including metadata and binding-builder tags. Binding replacement through `set()` and `extend()` is unchanged pending contract clarification.
 - Strict compiled containers now retain the built-in `ArgonContainer` and PSR `ContainerInterface` self bindings for lookups and injection. Both compiled modes return the current container directly, matching runtime self-resolution.
 - Updated PHPUnit to 11.5.57 and PHP_CodeSniffer to 4.0.4, with development dependency minimums of 11.5.50 and 4.0.2 respectively. Dependency auditing now runs in `composer check`, `composer ci`, and GitHub Actions through `composer audit:dependencies`; it requires advisory-service access.

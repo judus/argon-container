@@ -65,6 +65,47 @@ final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
 
+    /** @return iterable<string, array{bool, bool}> */
+    public static function lifecycleDefaults(): iterable
+    {
+        yield 'dynamic-shared' => [false, true];
+        yield 'dynamic-transient' => [false, false];
+        yield 'strict-shared' => [true, true];
+        yield 'strict-transient' => [true, false];
+    }
+
+    #[DataProvider('lifecycleDefaults')]
+    public function testCompilationPreservesDefaultLifecycle(bool $strict, bool $shared): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict, sharedByDefault: $shared);
+        $runtime->set('default-service', Logger::class);
+        $runtime->set('shared-service', Logger::class)->shared();
+        $runtime->set('transient-service', Logger::class)->transient();
+        $compiled = $this->compileAndLoadContainer($runtime, 'Lifecycle_' . (int) $strict . '_' . (int) $shared);
+
+        foreach ([$runtime, $compiled] as $container) {
+            self::assertSame($shared, $container->isSharedByDefault());
+            self::assertSame($strict, $container->isStrictMode());
+            self::assertSame($shared, $container->get('default-service') === $container->get('default-service'));
+            self::assertSame($container->get('shared-service'), $container->get('shared-service'));
+            self::assertNotSame($container->get('transient-service'), $container->get('transient-service'));
+
+            $default = $container->set('late-default', Logger::class)->getDescriptor();
+            $forcedShared = $container->set('late-shared', Logger::class)->shared()->getDescriptor();
+            $forcedTransient = $container->set('late-transient', Logger::class)->transient()->getDescriptor();
+            self::assertSame($shared, $default->isShared());
+            self::assertTrue($forcedShared->isShared());
+            self::assertFalse($forcedTransient->isShared());
+
+            // Strict compiled post-load resolution is a separate, deferred contract question.
+            if (!$strict) {
+                self::assertSame($shared, $container->get('late-default') === $container->get('late-default'));
+                self::assertSame($container->get('late-shared'), $container->get('late-shared'));
+                self::assertNotSame($container->get('late-transient'), $container->get('late-transient'));
+            }
+        }
+    }
+
     /** @return iterable<string, array{bool, string, mixed, bool}> */
     public static function numericInvocationCases(): iterable
     {
