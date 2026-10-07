@@ -228,6 +228,11 @@ final class ServiceResolver implements ServiceResolverInterface
         }
 
         if ($descriptor = $this->binder->getDescriptor($className)) {
+            if ($descriptor->hasFactory()) {
+                return $this->resolveFromFactory($className, $descriptor, $args);
+            }
+
+            $args = array_merge($descriptor->getArguments(), $args);
             $concrete = $descriptor->getConcrete();
 
             if ($concrete instanceof Closure) {
@@ -235,7 +240,6 @@ final class ServiceResolver implements ServiceResolverInterface
             }
 
             if ($concrete !== $className) {
-                $args = array_merge($descriptor->getArguments(), $args);
                 return $this->resolveClass($concrete, $args, [...$aliasChain, $className]);
             }
         }

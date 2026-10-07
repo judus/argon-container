@@ -6,6 +6,7 @@ All notable changes to `maduser/argon-container` will be documented in this file
 
 ### Fixed
 
+- Compiled bindings now follow class/interface alias chains to the final implementation or factory. Runtime aliases now honor target factories and bound arguments, with caller arguments taking precedence over alias arguments, target arguments and defaults (including explicit null overrides). Lifecycles and caches remain separate per requested service ID. Circular aliases fail at resolution time; closure-backed aliases remain non-compilable.
 - Compiled containers now preserve `sharedByDefault`, so default lifecycle inspection and subsequent registrations retain the source container's shared or transient default. Explicit per-binding lifecycle overrides are unchanged.
 - Compiled `isResolvable()` now recognizes compiled bindings while retaining the existing strict/dynamic inspection rules. Compiled tag snapshots and subsequent tag updates now share the runtime tag registry, keeping all tag queries consistent, including metadata and binding-builder tags. Binding replacement through `set()` and `extend()` is unchanged pending contract clarification.
 - Strict compiled containers now retain the built-in `ArgonContainer` and PSR `ContainerInterface` self bindings for lookups and injection. Both compiled modes return the current container directly, matching runtime self-resolution.

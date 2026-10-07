@@ -17,6 +17,19 @@ use Tests\Mocks\LoggerInterface;
 
 final class ParameterResolverTest extends TestCase
 {
+    public function testAliasCycleProducesResolutionFailureExpression(): void
+    {
+        $container = new ArgonContainer();
+        $container->set(\Tests\Integration\Compiler\Mocks\AliasBase::class, Logger::class);
+        $container->set(Logger::class, \Tests\Integration\Compiler\Mocks\AliasBase::class);
+        $code = $this->makeResolver($container)->resolveParameter(
+            $this->makeParameterMock('id'),
+            Logger::class
+        );
+        self::assertStringStartsWith('throw ContainerException::forCircularDependency(', $code);
+        self::assertStringContainsString(var_export(Logger::class, true), $code);
+    }
+
     public function testReturnsArgumentAccessWhenNoFallbacks(): void
     {
         $param = $this->makeParameterMock('id', allowsNull: false, hasDefault: false);

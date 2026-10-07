@@ -88,6 +88,13 @@ $logger = $container->get(LoggerInterface::class);
 
 > **Tip:** Bind aliases or interfaces *before* registering the services that consume them. Resolution happens immediately, so the container can only error, not infer, when a dependency is missing.
 
+When a binding points to another registered class, resolution follows that binding
+chain to its final implementation or factory, in both runtime and compiled modes.
+Arguments passed to `get()` take precedence over the requested binding's arguments,
+then arguments from each successive target binding, then constructor/factory defaults.
+Explicit `null` is an override. Each service ID retains its own lifecycle and cache;
+following a target binding does not reuse that target's cached instance.
+
 By default, every binding is shared. Prefer transient lifecycles instead? Pass `sharedByDefault: false`
 to the constructor and opt specific services back into shared mode when needed:
 

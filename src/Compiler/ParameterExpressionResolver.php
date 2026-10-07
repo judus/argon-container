@@ -65,6 +65,13 @@ final class ParameterExpressionResolver
         $declaringClass = $parameter->getDeclaringClass();
         $context = $declaringClass?->getName() ?? $serviceId;
         $descriptor = $this->container->getDescriptor($serviceId);
+        if ($descriptor !== null) {
+            $descriptor = (new ServiceDefinitionResolver())->resolve($this->container, $serviceId, $descriptor);
+            if ($descriptor instanceof CircularAlias) {
+                return 'throw ContainerException::forCircularDependency('
+                    . var_export($descriptor->id, true) . ', ' . var_export($descriptor->chain, true) . ')';
+            }
+        }
         $boundArguments = $descriptor?->getArguments() ?? [];
         $plan = $this->planner->build(
             $parameter,

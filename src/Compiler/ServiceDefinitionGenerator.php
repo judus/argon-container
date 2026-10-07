@@ -34,6 +34,22 @@ final class ServiceDefinitionGenerator
             }
 
             $methodName = $this->buildServiceMethodName($id);
+            $resolved = (new ServiceDefinitionResolver())->resolve($context->container, $id, $descriptor);
+            if ($resolved instanceof CircularAlias) {
+                // Keep alias-cycle failures at resolution time so pre-interceptors can short-circuit them.
+                $context->class->addMethod($methodName)
+                    ->setPrivate()
+                    ->setReturnType('object')
+                    ->setBody(
+                        'throw ContainerException::forCircularDependency(?, ?);',
+                        [$resolved->id, $resolved->chain]
+                    )
+                    ->addParameter('args')->setType('array')->setDefaultValue([]);
+                $serviceMap[$id] = $methodName;
+                continue;
+            }
+            $cacheType = $resolved === $descriptor ? $id : 'object';
+            $descriptor = $resolved;
             $concrete = $descriptor->getConcrete();
 
             if ($descriptor->hasFactory()) {
@@ -43,6 +59,7 @@ final class ServiceDefinitionGenerator
                     $id,
                     $methodName,
                     $descriptor,
+                    $cacheType,
                     $serviceMap
                 );
                 continue;
@@ -51,7 +68,7 @@ final class ServiceDefinitionGenerator
             $singletonProperty = "singleton_{$methodName}";
 
             if ($descriptor->isShared()) {
-                $this->generateSingletonProperty($context->class, $singletonProperty, $id);
+                $this->generateSingletonProperty($context->class, $singletonProperty, $cacheType);
             }
 
             /** @var class-string $concrete */
@@ -80,6 +97,7 @@ final class ServiceDefinitionGenerator
         string $id,
         string $methodName,
         ServiceDescriptorInterface $descriptor,
+        string $cacheType,
         array &$serviceMap
     ): void {
         $factoryClass = $descriptor->getFactoryClass();
@@ -99,7 +117,6 @@ final class ServiceDefinitionGenerator
         $argString = implode(",\n", $args);
 
         $fqFactory = '\\' . ltrim($factoryClass, '\\');
-        $returnType = class_exists($id) || interface_exists($id) ? '\\' . ltrim($id, '\\') : 'object';
         $singletonProperty = "singleton_{$methodName}";
         $serviceId = var_export($id, true);
         $factoryInvocation = $methodReflection->isStatic()
@@ -110,10 +127,7 @@ final class ServiceDefinitionGenerator
         $namespace->addUse($factoryClass);
 
         if ($descriptor->isShared()) {
-            $class->addProperty($singletonProperty)
-                ->setPrivate()
-                ->setType('?' . $returnType)
-                ->setValue(null);
+            $this->generateSingletonProperty($class, $singletonProperty, $cacheType);
         }
 
         $method = $class->addMethod($methodName);

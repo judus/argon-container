@@ -23,6 +23,12 @@ use stdClass;
 use TypeError;
 use Tests\Integration\Compiler\Mocks\SelfDependent;
 use Tests\Integration\Compiler\Mocks\ContainerConsumer;
+use Tests\Integration\Compiler\Mocks\AliasBase;
+use Tests\Integration\Compiler\Mocks\AliasMiddle;
+use Tests\Integration\Compiler\Mocks\AliasLeaf;
+use Tests\Integration\Compiler\Mocks\AliasFactory;
+use Tests\Integration\Compiler\Mocks\AliasCycleInterceptor;
+use Tests\Integration\Compiler\Mocks\AliasContract;
 use Tests\Integration\Compiler\Mocks\DefaultValueService;
 use Tests\Integration\Compiler\Mocks\CyclicFactory;
 use Tests\Integration\Compiler\Mocks\CyclicPreInterceptor;
@@ -64,6 +70,139 @@ use Tests\Mocks\DummyProvider;
 final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
+
+    /** @return iterable<string, array{bool, bool, bool, string}> */
+    public static function aliasCases(): iterable
+    {
+        foreach ([false, true] as $strict) {
+            foreach ([false, true] as $shared) {
+                foreach ([false, true] as $targetShared) {
+                    foreach (['class', 'instance', 'static'] as $kind) {
+                        yield (int) $strict . '_' . (int) $shared . '_' . (int) $targetShared . '_' . $kind
+                            => [$strict, $shared, $targetShared, $kind];
+                    }
+                }
+            }
+        }
+    }
+
+    #[DataProvider('aliasCases')]
+    public function testAliasConstructionMatchesRuntime(
+        bool $strict,
+        bool $shared,
+        bool $targetShared,
+        string $kind
+    ): void {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $leaf = $runtime->set(AliasLeaf::class, args: [
+            'label' => 'target', 'nullable' => 'target', 'inherited' => 'target',
+        ]);
+        $leaf->getDescriptor()->setShared($targetShared);
+        $runtime->set(AliasFactory::class);
+        if ($kind !== 'class') {
+            $leaf->factory(AliasFactory::class, $kind === 'static' ? 'create' : '__invoke');
+        }
+        $runtime->set(AliasMiddle::class, AliasLeaf::class, ['label' => 'middle', 'nullable' => null]);
+        $runtime->set(AliasBase::class, AliasMiddle::class, ['label' => 'alias'])
+            ->defineInvocation('describe')->getDescriptor()->setShared($shared);
+        $runtime->set('override', AliasBase::class)->transient();
+        $runtime->set(AliasContract::class, AliasBase::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'Alias_' . bin2hex(random_bytes(6)));
+        $prefix = $kind === 'class' ? '' : 'factory:';
+
+        foreach ([$runtime, $compiled] as $container) {
+            $target = $container->get(AliasLeaf::class);
+            $alias = $container->get(AliasBase::class);
+            self::assertInstanceOf(AliasLeaf::class, $alias);
+            self::assertSame($prefix . 'alias', $alias->label);
+            self::assertNull($alias->nullable);
+            self::assertSame('target', $alias->inherited);
+            self::assertSame($prefix . 'alias', (new ServiceInvoker($container, AliasBase::class, 'describe'))());
+            $interface = $container->get(AliasContract::class);
+            self::assertSame($prefix . 'alias', $interface->describe());
+            self::assertNotSame($alias, $interface);
+            self::assertSame($prefix . 'middle', $container->get(AliasMiddle::class)->label);
+            self::assertNotSame($target, $alias);
+            self::assertSame($shared, $alias === $container->get(AliasBase::class));
+            self::assertSame($targetShared, $target === $container->get(AliasLeaf::class));
+            $override = $container->get('override', ['label' => 'runtime', 'nullable' => 'runtime']);
+            self::assertInstanceOf(AliasLeaf::class, $override);
+            self::assertSame($prefix . 'runtime', $override->label);
+            self::assertSame('runtime', $override->nullable);
+            self::assertSame('target', $override->inherited);
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledAliasCyclesFailAtResolution(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(AliasBase::class, AliasMiddle::class);
+        $runtime->set(AliasMiddle::class, AliasBase::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'AliasCycle_' . (int) $strict);
+        foreach ([$runtime, $compiled] as $container) {
+            for ($attempt = 0; $attempt < 2; $attempt++) {
+                try {
+                    $container->get(AliasBase::class);
+                    self::fail('Alias cycle must throw.');
+                } catch (ContainerException $e) {
+                    self::assertStringContainsString('Circular dependency detected', $e->getMessage());
+                    self::assertStringContainsString(AliasBase::class, $e->getMessage());
+                    self::assertStringContainsString(AliasMiddle::class, $e->getMessage());
+                }
+            }
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testPreInterceptorCanShortCircuitAliasCycle(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(AliasBase::class, AliasMiddle::class);
+        $runtime->set(AliasMiddle::class, AliasBase::class);
+        $runtime->set(AliasCycleInterceptor::class);
+        $runtime->set('\\' . AliasCycleInterceptor::class);
+        $runtime->registerInterceptor(AliasCycleInterceptor::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'AliasShortCircuit_' . (int) $strict);
+        foreach ([$runtime, $compiled] as $container) {
+            self::assertSame('intercepted', $container->get(AliasBase::class)->label);
+        }
+    }
+
+    public function testAliasInheritsClosureArgumentsButCannotCompileTheClosure(): void
+    {
+        $container = new ArgonContainer();
+        $container->set(AliasLeaf::class, static fn(string $label) => new AliasLeaf($label), ['label' => 'target'])
+            ->skipCompilation();
+        $container->set(AliasBase::class, AliasLeaf::class)->transient();
+        self::assertSame('target', $container->get(AliasBase::class)->label);
+        self::assertSame('override', $container->get(AliasBase::class, ['label' => 'override'])->label);
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage('Cannot compile a container with closures');
+        $this->compileAndLoadContainer($container, 'AliasClosure');
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testCompiledAliasCacheUsesFinalConcreteType(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(AliasBase::class, AliasMiddle::class);
+        $runtime->set(AliasMiddle::class, Logger::class);
+        $runtime->set(Logger::class);
+        $runtime->set(AliasFactory::class);
+        $runtime->set(Mailer::class, AliasLeaf::class);
+        $runtime->set(AliasLeaf::class, args: ['label' => 'factory', 'nullable' => null, 'inherited' => 'target'])
+            ->factory(AliasFactory::class);
+        $compiled = $this->compileAndLoadContainer($runtime, 'AliasCacheType_' . (int) $strict);
+        foreach ([$runtime, $compiled] as $container) {
+            $instance = $container->get(AliasBase::class);
+            self::assertSame(Logger::class, $instance::class);
+            self::assertSame($instance, $container->get(AliasBase::class));
+            $factoryInstance = $container->get(Mailer::class);
+            self::assertSame(AliasLeaf::class, $factoryInstance::class);
+            self::assertSame($factoryInstance, $container->get(Mailer::class));
+        }
+    }
 
     /** @return iterable<string, array{bool, bool}> */
     public static function lifecycleDefaults(): iterable

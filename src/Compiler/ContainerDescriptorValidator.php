@@ -24,7 +24,12 @@ final class ContainerDescriptorValidator
                 continue;
             }
 
-            $this->validateDescriptor($id, $descriptor);
+            $resolved = (new ServiceDefinitionResolver())->resolve($container, $id, $descriptor);
+            if ($resolved instanceof CircularAlias) {
+                // The generated getter reports alias cycles when resolution is actually attempted.
+                continue;
+            }
+            $this->validateDescriptor($id, $resolved);
         }
     }
 
