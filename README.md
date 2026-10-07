@@ -493,6 +493,10 @@ The compiled container is a pure PHP class with zero runtime resolution logic fo
 When `strictMode` is omitted, the compiler mirrors the source container's current strict-mode setting. Pass
 `strictMode: false` explicitly to force a lenient compiled container from a strict runtime container.
 
+The destination directory must already exist and be writable. Compilation publishes
+the completed file through a same-directory atomic rename and throws `ContainerException`
+if publication fails, leaving any previous cache intact. Unchanged output is not rewritten.
+
 ## `ArgonContainer` API
 
 | ArgonContainer            | Parameters                                      | Return                                     | Description                                                                       |

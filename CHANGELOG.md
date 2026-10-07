@@ -6,6 +6,7 @@ All notable changes to `maduser/argon-container` will be documented in this file
 
 ### Fixed
 
+- Compiled containers are now published through a checked temporary-file write and same-directory rename. Failed or incomplete writes throw `ContainerException` without replacing the previous cache; temporary files are cleaned up. Existing file permissions and valid symlink targets are preserved, and unchanged output is not rewritten.
 - Compiled invocations no longer resolve named service-reference defaults when the caller supplies that argument, including explicit null. Omitted defaults still resolve normally, avoiding unused service construction and failures from overridden dependencies.
 - Compiled factory method arguments now use the factory-owning service binding's contextual bindings, matching runtime resolution for direct bindings and alias chains. Factory constructor context and explicit argument precedence are unchanged.
 - Compiled bindings now follow class/interface alias chains to the final implementation or factory. Runtime aliases now honor target factories and bound arguments, with caller arguments taking precedence over alias arguments, target arguments and defaults (including explicit null overrides). Lifecycles and caches remain separate per requested service ID. Circular aliases fail at resolution time; closure-backed aliases remain non-compilable.

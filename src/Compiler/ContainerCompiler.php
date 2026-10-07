@@ -62,8 +62,51 @@ final class ContainerCompiler
 
         $compiled = (string) $context->file;
 
-        if (!file_exists($filePath) || md5_file($filePath) !== md5($compiled)) {
-            file_put_contents($filePath, $compiled);
+        if (!is_file($filePath) || @md5_file($filePath) !== md5($compiled)) {
+            $this->publish($filePath, $compiled);
+        }
+    }
+
+    private function publish(string $filePath, string $compiled): void
+    {
+        // Resolve existing symlinks so publishing replaces their target, not the link.
+        $resolvedPath = realpath($filePath);
+        $destination = $resolvedPath === false ? $filePath : $resolvedPath;
+        $directory = realpath(dirname($destination));
+        if ($directory === false || !is_dir($directory)) {
+            throw new ContainerException(
+                "Cannot compile container to [$filePath]: destination directory does not exist."
+            );
+        }
+
+        $permissions = is_file($destination) ? @fileperms($destination) : 0666 & ~umask();
+        if ($permissions === false) {
+            throw new ContainerException("Cannot read compiled container permissions for [$filePath].");
+        }
+
+        $temporary = @tempnam($directory, '.argon-');
+        if ($temporary === false) {
+            throw new ContainerException("Cannot create temporary compiled container for [$filePath].");
+        }
+
+        try {
+            // tempnam may fall back to the system temp directory; that cannot guarantee atomic rename.
+            if (dirname($temporary) !== $directory) {
+                throw new ContainerException("Cannot create temporary compiled container in [$directory].");
+            }
+            if (@file_put_contents($temporary, $compiled) !== strlen($compiled)) {
+                throw new ContainerException("Cannot write complete compiled container for [$filePath].");
+            }
+            if (!@chmod($temporary, $permissions & 0777)) {
+                throw new ContainerException("Cannot set compiled container permissions for [$filePath].");
+            }
+            if (!@rename($temporary, $destination)) {
+                throw new ContainerException("Cannot publish compiled container to [$filePath].");
+            }
+        } finally {
+            if (file_exists($temporary) && !@unlink($temporary)) {
+                throw new ContainerException("Cannot remove temporary compiled container [$temporary].");
+            }
         }
     }
 }
