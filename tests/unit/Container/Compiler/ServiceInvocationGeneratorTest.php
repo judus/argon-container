@@ -50,6 +50,10 @@ final class ServiceInvocationGeneratorTest extends TestCase
         $escapedServiceClass = str_replace('\\', '\\\\', ServiceWithTypedMethods::class);
         self::assertStringContainsString("\$controller = \$this->get('{$escapedServiceClass}');", $body);
         self::assertStringContainsString("\$this->get('dependency.service')", $body);
+        self::assertStringContainsString(
+            "array_key_exists('dependency', \$args) ? \$args['dependency'] : \$this->get('dependency.service')",
+            $body
+        );
         self::assertStringNotContainsString('(int)', $body);
         self::assertStringNotContainsString('(float)', $body);
         self::assertStringNotContainsString('Reflection', $body);
@@ -76,6 +80,20 @@ final class ServiceInvocationGeneratorTest extends TestCase
             . '__handle';
 
         self::assertFalse($class->hasMethod($closureInvokerName));
+    }
+
+    public function testPositionalDefaultsRetainArrayMergeSemantics(): void
+    {
+        $container = new ArgonContainer();
+        $container->set(ServiceWithTypedMethods::class)->defineInvocation('handle', ['@dependency.service']);
+        $class = new ClassType('CompiledContainer');
+        (new ServiceInvocationGenerator($container))->generate($class);
+        $method = $class->getMethod(StringHelper::invokeServiceMethod(ServiceWithTypedMethods::class, 'handle'));
+        self::assertStringContainsString(
+            "array_merge([0 => \$this->get('dependency.service')], \$args)",
+            $method->getBody()
+        );
+        self::assertStringNotContainsString('array_key_exists', $method->getBody());
     }
 
     public function testGenerateOmitsPrimitiveCastsForClosureConcrete(): void

@@ -31,6 +31,7 @@ use Tests\Integration\Compiler\Mocks\AliasCycleInterceptor;
 use Tests\Integration\Compiler\Mocks\AliasContract;
 use Tests\Integration\Compiler\Mocks\ContextualFactory;
 use Tests\Integration\Compiler\Mocks\ContextualFactoryMethods;
+use Tests\Integration\Compiler\Mocks\CountingLogger;
 use Tests\Integration\Compiler\Mocks\DefaultValueService;
 use Tests\Integration\Compiler\Mocks\CyclicFactory;
 use Tests\Integration\Compiler\Mocks\CyclicPreInterceptor;
@@ -72,6 +73,48 @@ use Tests\Mocks\DummyProvider;
 final class ContainerCompilerTest extends TestCase
 {
     private static ?string $compilerCacheDir = null;
+
+    #[DataProvider('invocationModes')]
+    public function testInvocationOverrideSkipsMissingDefault(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(InvocationTarget::class)
+            ->defineInvocation('dependency', ['logger' => '@' . LoggerInterface::class]);
+        $compiled = $this->compileAndLoadContainer($runtime, 'MissingInvocationDefault_' . (int) $strict);
+        $logger = new CustomLogger();
+        foreach ([$runtime, $compiled] as $container) {
+            $invoke = new ServiceInvoker($container, InvocationTarget::class, 'dependency');
+            self::assertSame($logger, $invoke(['logger' => $logger]));
+            try {
+                $invoke();
+                self::fail('An omitted argument must still resolve its missing default.');
+            } catch (NotFoundException $exception) {
+                self::assertStringContainsString(LoggerInterface::class, $exception->getMessage());
+            }
+        }
+    }
+
+    #[DataProvider('invocationModes')]
+    public function testInvocationOverrideDoesNotConstructDefault(bool $strict): void
+    {
+        $runtime = new ArgonContainer(strictMode: $strict);
+        $runtime->set(LoggerInterface::class, CountingLogger::class)->transient();
+        $runtime->set(InvocationTarget::class)
+            ->defineInvocation('dependency', ['logger' => '@' . LoggerInterface::class])
+            ->defineInvocation('nullable', ['logger' => '@' . LoggerInterface::class]);
+        $compiled = $this->compileAndLoadContainer($runtime, 'LazyInvocationDefault_' . (int) $strict);
+        foreach ([$runtime, $compiled] as $container) {
+            CountingLogger::$constructions = 0;
+            $invoke = new ServiceInvoker($container, InvocationTarget::class, 'dependency');
+            $nullable = new ServiceInvoker($container, InvocationTarget::class, 'nullable');
+            $logger = new CustomLogger();
+            self::assertSame($logger, $invoke(['logger' => $logger]));
+            self::assertNull($nullable(['logger' => null]));
+            self::assertSame(0, CountingLogger::constructions());
+            self::assertInstanceOf(CountingLogger::class, $invoke());
+            self::assertSame(1, CountingLogger::constructions());
+        }
+    }
 
     /** @return iterable<string, array{bool, string}> */
     public static function factoryContextCases(): iterable

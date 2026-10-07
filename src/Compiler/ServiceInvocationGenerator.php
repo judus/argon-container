@@ -29,8 +29,12 @@ final class ServiceInvocationGenerator
                 foreach ($args as $name => $value) {
                     if (is_string($value) && str_starts_with($value, '@')) {
                         $className = substr($value, 1);
-                        $compiledArgs[] = var_export($name, true) .
-                            " => \$this->get(" . var_export($className, true) . ")";
+                        $key = var_export($name, true);
+                        $expression = "\$this->get(" . var_export($className, true) . ")";
+                        if (is_string($name)) {
+                            $expression = "array_key_exists({$key}, \$args) ? \$args[{$key}] : {$expression}";
+                        }
+                        $compiledArgs[] = $key . ' => ' . $expression;
                     } else {
                         $compiledArgs[] = var_export($name, true) .
                             " => " . var_export($value, true);
